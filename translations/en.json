@@ -1,0 +1,48 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect your Aerauliqa QR",
+        "data": {
+          "name": "Name",
+          "transport": "Connection type",
+          "slave": "Modbus unit ID"
+        }
+      },
+      "tcp": {
+        "title": "Modbus TCP connection",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
+      },
+      "serial": {
+        "title": "Modbus RTU connection",
+        "data": {
+          "device": "Serial device",
+          "baudrate": "Baud rate",
+          "parity": "Parity",
+          "stopbits": "Stop bits"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the device or read its control registers.",
+      "invalid_host": "Enter a host name or IP address.",
+      "invalid_device": "Enter the serial device path."
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Polling",
+        "data": {
+          "scan_interval": "Polling interval (seconds)"
+        }
+      }
+    }
+  }
+}
