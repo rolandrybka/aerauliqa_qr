@@ -9,6 +9,21 @@ class AerauliqaQRCard extends HTMLElement {
     this.config = {
       name: "Aerauliqa QR",
       temperatures: {},
+      fans: {},
+      air_paths: [
+        {
+          name: "Supply air",
+          from: "T11",
+          to: "T12",
+          direction: "forward",
+        },
+        {
+          name: "Extract air",
+          from: "T21",
+          to: "T22",
+          direction: "reverse",
+        },
+      ],
       ...config,
     };
     if (!this.shadowRoot) {
@@ -27,7 +42,7 @@ class AerauliqaQRCard extends HTMLElement {
   }
 
   getCardSize() {
-    return 4;
+    return 6;
   }
 
   escape(value) {
@@ -40,7 +55,93 @@ class AerauliqaQRCard extends HTMLElement {
   }
 
   entityState(entityId) {
-    return this.hass?.states?.[entityId];
+    return entityId ? this.hass?.states?.[entityId] : undefined;
+  }
+
+  renderIcon(name, className = "label-icon") {
+    const paths = {
+      power: '<path d="M12 2v10"/><path d="M5.2 5.2a9 9 0 1 0 13.6 0"/>',
+      fan: '<path d="M12 12c-1-2 0-8 3-8 2 0 2 3 0 5-1 1-2 2-3 3Z"/><path d="M12 12c2-1 8 0 8 3 0 2-3 2-5 0-1-1-2-2-3-3Z"/><path d="M12 12c1 2 0 8-3 8-2 0-2-3 0-5 1-1 2-2 3-3Z"/><path d="M12 12c-2 1-8 0-8-3 0-2 3-2 5 0 1 1 2 2 3 3Z"/>',
+      mode: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/>',
+    };
+
+    return `<svg class="${className}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || ""}</svg>`;
+  }
+
+  sensorValue(entityId, fallbackUnit = "") {
+    const entity = this.entityState(entityId);
+    if (!entity || ["unknown", "unavailable"].includes(entity.state)) {
+      return { value: "—", unit: "" };
+    }
+
+    const numericValue = Number(entity.state);
+    const value = Number.isFinite(numericValue)
+      ? Number.isInteger(numericValue)
+        ? String(numericValue)
+        : numericValue.toFixed(1)
+      : entity.state;
+    return {
+      value,
+      unit: entity.attributes.unit_of_measurement || fallbackUnit,
+    };
+  }
+
+  renderTemperature(label, entityId) {
+    const { value, unit } = this.sensorValue(entityId, "°C");
+    const numericValue = Number(value);
+    const hue = Number.isFinite(numericValue)
+      ? Math.max(0, Math.min(220, 220 - numericValue * 5.5))
+      : 36;
+
+    return `
+      <div class="temperature">
+        <span class="temperature-label">${this.escape(label)}</span>
+        <strong style="--temperature-hue: ${hue}">${this.escape(value)}${this.escape(unit)}</strong>
+      </div>`;
+  }
+
+  renderAirPath(path, flowing) {
+    const temperatures = this.config.temperatures || {};
+    const reverse = path.direction === "reverse";
+    const flowClass = flowing ? "flow-line active" : "flow-line";
+
+    return `
+      <div class="air-path ${reverse ? "reverse" : ""}">
+        <div class="path-name">${this.escape(path.name)}</div>
+        ${this.renderTemperature(path.from, temperatures[path.from])}
+        <div class="${flowClass}" aria-hidden="true"><span></span></div>
+        <div class="exchanger" aria-label="Heat exchanger">
+          <span class="exchanger-mark">✣</span>
+          <small>HR</small>
+        </div>
+        <div class="${flowClass}" aria-hidden="true"><span></span></div>
+        ${this.renderTemperature(path.to, temperatures[path.to])}
+      </div>`;
+  }
+
+  renderFan(key, label, active) {
+    const fan = this.config.fans?.[key] || {};
+    const output = this.sensorValue(fan.output, "%");
+    const rpm = this.sensorValue(fan.rpm, "rpm");
+    const outputValue = Number(output.value);
+    const outputPercent = Number.isFinite(outputValue)
+      ? Math.max(0, Math.min(100, outputValue))
+      : 0;
+    const spinning = active && outputPercent > 0;
+    const duration = (5 - outputPercent * 0.045).toFixed(2);
+
+    return `
+      <div class="fan">
+        <div class="rotor ${spinning ? "spinning" : ""}" style="--spin-duration: ${duration}s" aria-hidden="true">
+          <i></i><i></i><i></i><i></i>
+          <b></b>
+        </div>
+        <div class="fan-data">
+          <span class="fan-name">${this.escape(label)}</span>
+          <strong>${this.escape(output.value)}${this.escape(output.unit)}</strong>
+          <small>${this.escape(rpm.value)} ${this.escape(rpm.unit)}</small>
+        </div>
+      </div>`;
   }
 
   renderSelect(entityId, label, icon) {
@@ -61,7 +162,7 @@ class AerauliqaQRCard extends HTMLElement {
 
     return `
       <label class="control">
-        <span>${icon} ${label}</span>
+        <span class="control-heading">${this.renderIcon(icon)}${this.escape(label)}</span>
         <select data-entity="${this.escape(entityId)}">${optionMarkup}</select>
       </label>`;
   }
@@ -74,20 +175,10 @@ class AerauliqaQRCard extends HTMLElement {
     const power = this.entityState(this.config.power_entity);
     const running = power?.state === "on";
     const stale = power?.attributes?.modbus_stale === true;
-    const temperatures = Object.entries(this.config.temperatures || {})
-      .map(([label, entityId]) => {
-        const entity = this.entityState(entityId);
-        const value = entity
-          ? `${this.escape(entity.state)}${this.escape(
-              entity.attributes.unit_of_measurement || "°C"
-            )}`
-          : "—";
-        return `
-          <div class="temperature">
-            <span>${this.escape(label)}</span>
-            <strong>${value}</strong>
-          </div>`;
-      })
+    const flowing = running && !stale;
+    const paths = this.config.air_paths || [];
+    const airPaths = paths
+      .map((path) => this.renderAirPath(path, flowing))
       .join("");
     const error = this._error
       ? `<p class="error">${this.escape(this._error)}</p>`
@@ -95,15 +186,19 @@ class AerauliqaQRCard extends HTMLElement {
 
     this.shadowRoot.innerHTML = `
       <style>
-        :host { display: block; }
+        :host {
+          display: block;
+          --aerauliqa-panel-background: rgba(77, 163, 223, 0.14);
+        }
         ha-card {
           overflow: hidden;
           color: var(--primary-text-color);
-          border-radius: 20px;
+          border-radius: 22px;
           background:
-            radial-gradient(ellipse at 100% 0%, #42b6a433, transparent 48%),
+            radial-gradient(ellipse at 4% 0%, #54a9ff20, transparent 38%),
+            radial-gradient(ellipse at 100% 0%, #42b6a433, transparent 45%),
             var(--ha-card-background, var(--card-background-color));
-          box-shadow: var(--ha-card-box-shadow, 0 4px 18px #0002);
+          box-shadow: var(--ha-card-box-shadow, 0 5px 22px #0002);
         }
         .header {
           display: flex;
@@ -116,33 +211,172 @@ class AerauliqaQRCard extends HTMLElement {
         .status {
           border-radius: 999px;
           padding: 6px 11px;
-          background: ${
-            stale ? "#e6a23c30" : running ? "#27ae6030" : "#7f8c8d24"
-          };
-          color: ${
-            stale ? "#e6a23c" : running ? "#3aba70" : "var(--secondary-text-color)"
-          };
+          background: ${stale ? "#e6a23c30" : running ? "#27ae6030" : "#7f8c8d24"};
+          color: ${stale ? "#e6a23c" : running ? "#3aba70" : "var(--secondary-text-color)"};
           font-size: 12px;
           font-weight: 700;
           text-transform: uppercase;
         }
-        .temperatures {
+        .section-title {
+          padding: 4px 20px 10px;
+          color: var(--secondary-text-color);
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: .1em;
+          text-transform: uppercase;
+        }
+        .airflow {
+          display: grid;
+          gap: 10px;
+          padding: 0 18px 18px;
+        }
+        .air-path {
+          display: grid;
+          grid-template-columns: minmax(65px, 1fr) minmax(20px, .5fr) 62px minmax(20px, .5fr) minmax(65px, 1fr);
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+          padding: 11px;
+          border-radius: 16px;
+          background: var(--aerauliqa-panel-background);
+        }
+        .path-name {
+          grid-column: 1 / -1;
+          direction: ltr;
+          color: var(--secondary-text-color);
+          font-size: 11px;
+          font-weight: 650;
+          letter-spacing: .04em;
+          text-transform: uppercase;
+        }
+        .temperature {
+          direction: ltr;
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+          min-width: 0;
+          padding: 8px;
+          border-radius: 11px;
+          background: var(--aerauliqa-panel-background);
+          text-align: center;
+        }
+        .temperature-label { color: var(--secondary-text-color); font-size: 11px; }
+        .temperature strong {
+          color: hsl(var(--temperature-hue, 36) 78% 55%);
+          font-size: clamp(14px, 4vw, 19px);
+          font-weight: 700;
+          white-space: nowrap;
+        }
+        .exchanger {
+          direction: ltr;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          width: 52px;
+          height: 52px;
+          margin: auto;
+          border: 1px solid var(--divider-color);
+          border-radius: 13px;
+          background:
+            linear-gradient(135deg, #ed795533 0 48%, transparent 49% 51%, #45a8e533 52%),
+            var(--ha-card-background, var(--card-background-color));
+        }
+        .exchanger-mark { font-size: 25px; line-height: 25px; }
+        .exchanger small { color: var(--secondary-text-color); font-size: 9px; font-weight: 700; }
+        .flow-line {
+          position: relative;
+          height: 3px;
+          border-radius: 3px;
+          background: var(--divider-color);
+        }
+        .flow-line::after {
+          position: absolute;
+          top: -4px;
+          right: -1px;
+          width: 0;
+          height: 0;
+          border-top: 5px solid transparent;
+          border-bottom: 5px solid transparent;
+          border-left: 7px solid var(--secondary-text-color);
+          content: "";
+        }
+        .reverse { direction: rtl; }
+        .reverse .flow-line::after {
+          right: auto;
+          left: -1px;
+          border-right: 7px solid var(--secondary-text-color);
+          border-left: 0;
+        }
+        .flow-line span {
+          position: absolute;
+          top: -2px;
+          left: 0;
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: var(--info-color, #4da3df);
+          opacity: 0;
+        }
+        .flow-line.active span { opacity: 1; animation: airflow 1.8s linear infinite; }
+        .reverse .flow-line.active span { animation-direction: reverse; }
+        @keyframes airflow {
+          from { transform: translateX(0); }
+          to { transform: translateX(calc(100% - 7px)); }
+        }
+        .fans {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 10px;
-          padding: 6px 18px 16px;
+          padding: 0 18px 18px;
         }
-        .temperature {
+        .fan {
           display: flex;
-          flex-direction: column;
-          gap: 8px;
+          align-items: center;
+          gap: 13px;
           min-width: 0;
-          padding: 14px;
-          border-radius: 14px;
-          background: var(--secondary-background-color, #8881);
+          padding: 13px;
+          border: 1px solid var(--divider-color);
+          border-radius: 16px;
+          background: var(--aerauliqa-panel-background);
         }
-        .temperature span { color: var(--secondary-text-color); font-size: 12px; }
-        .temperature strong { font-size: 23px; font-weight: 600; }
+        .rotor {
+          position: relative;
+          flex: 0 0 48px;
+          width: 48px;
+          height: 48px;
+          border: 2px solid var(--divider-color);
+          border-radius: 50%;
+          background: radial-gradient(circle, transparent 0 54%, #4da3df20 55%);
+        }
+        .rotor.spinning { animation: spin var(--spin-duration, 2s) linear infinite; }
+        .rotor i {
+          position: absolute;
+          top: 5px;
+          left: 20px;
+          width: 8px;
+          height: 17px;
+          border-radius: 80% 20% 65% 35%;
+          background: var(--info-color, #4da3df);
+          transform-origin: 4px 19px;
+        }
+        .rotor i:nth-child(2) { transform: rotate(90deg); }
+        .rotor i:nth-child(3) { transform: rotate(180deg); }
+        .rotor i:nth-child(4) { transform: rotate(270deg); }
+        .rotor b {
+          position: absolute;
+          top: 19px;
+          left: 19px;
+          width: 10px;
+          height: 10px;
+          border-radius: 50%;
+          background: var(--primary-text-color);
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .fan-data { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+        .fan-name { color: var(--secondary-text-color); font-size: 11px; }
+        .fan-data strong { font-size: 19px; line-height: 1.1; }
+        .fan-data small { color: var(--secondary-text-color); font-size: 11px; }
         .controls {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -160,6 +394,17 @@ class AerauliqaQRCard extends HTMLElement {
           border-radius: 14px;
           color: var(--secondary-text-color);
           font-size: 12px;
+        }
+        .control-heading {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .label-icon {
+          flex: 0 0 19px;
+          width: 19px;
+          height: 19px;
+          color: var(--info-color, #4da3df);
         }
         select {
           width: 100%;
@@ -180,9 +425,21 @@ class AerauliqaQRCard extends HTMLElement {
           border: 0;
           border-radius: 14px;
           color: var(--primary-text-color);
-          background: var(--secondary-background-color, #8881);
+          background: var(--aerauliqa-panel-background);
           font: inherit;
           cursor: pointer;
+        }
+        .power-label {
+          display: inline-flex;
+          align-items: center;
+          gap: 9px;
+          font-size: 14px;
+          font-weight: 600;
+        }
+        .power-icon {
+          width: 23px;
+          height: 23px;
+          color: var(--info-color, #4da3df);
         }
         .power:disabled { opacity: .55; cursor: default; }
         .toggle {
@@ -196,9 +453,21 @@ class AerauliqaQRCard extends HTMLElement {
           text-align: center;
         }
         .error { margin: 0; padding: 0 20px 16px; color: var(--error-color); }
-        @media (max-width: 360px) {
-          .temperatures, .controls { grid-template-columns: 1fr; }
+        @media (max-width: 460px) {
+          .air-path {
+            grid-template-columns: minmax(48px, .7fr) minmax(18px, .4fr) 48px minmax(18px, .4fr) minmax(48px, .7fr);
+            gap: 5px;
+            padding: 9px;
+          }
+          .path-name { grid-column: 1 / -1; }
+          .air-path .temperature { padding: 6px 3px; }
+          .exchanger { width: 44px; height: 44px; }
+          .fans { grid-template-columns: 1fr; }
+          .controls { grid-template-columns: 1fr; }
           .power { grid-column: auto; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .rotor.spinning, .flow-line.active span { animation: none; }
         }
       </style>
       <ha-card>
@@ -217,25 +486,27 @@ class AerauliqaQRCard extends HTMLElement {
                 : "Unavailable"
           }</span>
         </div>
-        ${
-          temperatures
-            ? `<div class="temperatures">${temperatures}</div>`
-            : ""
-        }
+        <div class="section-title">Airflow &amp; temperatures</div>
+        <div class="airflow">${airPaths}</div>
+        <div class="section-title">Fans</div>
+        <div class="fans">
+          ${this.renderFan("fan_1", "Fan 1", flowing)}
+          ${this.renderFan("fan_2", "Fan 2", flowing)}
+        </div>
         <div class="controls">
           <button class="power" type="button" ${power ? "" : "disabled"}>
-            <span>⏻ &nbsp; Ventilation</span>
+            <span class="power-label">${this.renderIcon("power", "power-icon")}Ventilation</span>
             <span class="toggle">${running ? "ON" : "OFF"}</span>
           </button>
           ${this.renderSelect(
             this.config.fan_speed_entity,
             "Fan speed",
-            "↗"
+            "fan"
           )}
           ${this.renderSelect(
             this.config.working_mode_entity,
             "Working mode",
-            "◉"
+            "mode"
           )}
         </div>
         ${error}
@@ -274,5 +545,5 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "aerauliqa-qr-card",
   name: "Aerauliqa QR",
-  description: "Ventilation controls and temperature overview",
+  description: "Heat recovery airflow, fan and temperature overview",
 });
