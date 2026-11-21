@@ -1,0 +1,48 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Aerauliqa QR csatlakoztatása",
+        "data": {
+          "name": "Név",
+          "transport": "Kapcsolat típusa",
+          "slave": "Modbus egységazonosító"
+        }
+      },
+      "tcp": {
+        "title": "Modbus TCP-kapcsolat",
+        "data": {
+          "host": "Kiszolgáló címe",
+          "port": "Port"
+        }
+      },
+      "serial": {
+        "title": "Modbus RTU-kapcsolat",
+        "data": {
+          "device": "Soros eszköz",
+          "baudrate": "Átviteli sebesség",
+          "parity": "Paritás",
+          "stopbits": "Stopbitek"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nem sikerült csatlakozni az eszközhöz vagy olvasni a vezérlőregisztereket.",
+      "invalid_host": "Adj meg egy kiszolgálónevet vagy IP-címet.",
+      "invalid_device": "Add meg a soros eszköz elérési útját."
+    },
+    "abort": {
+      "already_configured": "Ez az eszköz már be van állítva."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Lekérdezés",
+        "data": {
+          "scan_interval": "Lekérdezési időköz (másodperc)"
+        }
+      }
+    }
+  }
+}
