@@ -1,148 +1,227 @@
-import logging
-import voluptuous as vol
-import homeassistant.helpers.config_validation as cv
-from homeassistant.components.sensor import PLATFORM_SCHEMA
-from homeassistant.const import CONF_NAME
-from homeassistant.helpers.entity import Entity
-from pymodbus.client import ModbusTcpClient
-from pymodbus.exceptions import ConnectionException
+"""Sensors for Aerauliqa QR."""
 
-logging.basicConfig(level=logging.DEBUG)
-_LOGGER = logging.getLogger(__name__)
+from __future__ import annotations
 
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Required(CONF_NAME): cv.string,
-    vol.Required('host'): str,
-    vol.Required('port'): int,
-    vol.Required('sensors'): vol.All(),
-})
+from dataclasses import dataclass
 
-async def async_setup_platform(hass, config, add_entities, discovery_info=None):
-    name = config[CONF_NAME]
-    host = config['host']
-    port = config['port']
-    sensors = config['sensors']
-    try:
-        client = ModbusTcpClient(host, port)
-        client.connect()
-        _LOGGER.debug("::Modbus connection OK! %s:%s", host, port)
-    except ConnectionException as ex:
-        _LOGGER.error("::Error connecting to Modbus device: %s", str(ex))
-        return
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfTemperature
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-    modbus_sensors = []
-    for sensor in sensors:
-        modbus_sensor = AerauliqaQRSensor(client, sensor)
-        modbus_sensors.append(modbus_sensor)
-        if modbus_sensor._input_type == 'input':
-            _LOGGER.debug("::Modbus add write service %s", modbus_sensor._name)
-            async def handle_write_service(call):
-                state = call.data.get("state")
-                if state is not None:
-                    await modbus_sensor.async_set_state(state)
-            hass.services.async_register("aerauliqa_qr", modbus_sensor.service_name + "_write", handle_write_service)
+from .const import (
+    DOMAIN,
+    REGISTER_ANTI_FROST,
+    REGISTER_CTRL_DSP_FW_MAJOR,
+    REGISTER_CTRL_DSP_FW_MINOR,
+    REGISTER_DH_OUTPUT,
+    REGISTER_FAN_1,
+    REGISTER_FAN_2,
+    REGISTER_FAN_1_OUTPUT,
+    REGISTER_FAN_2_OUTPUT,
+    REGISTER_FILTER_COUNTDOWN,
+    REGISTER_HOURS,
+    REGISTER_HEAT_OUTPUT,
+    REGISTER_HUMIDITY,
+    REGISTER_MODBUS_FW_MAJOR,
+    REGISTER_MODBUS_FW_MINOR,
+    REGISTER_S4,
+    REGISTER_SLA,
+    REGISTER_T11,
+    REGISTER_T12,
+    REGISTER_T21,
+    REGISTER_T22,
+)
+from .coordinator import AerauliqaQRCoordinator
 
-    add_entities(modbus_sensors)
 
-class AerauliqaQRSensor(Entity):
-    def __init__(self, client, config):
-        self.entity_id = config.get('entity_id', None);
-        self.service_name = config.get('service_name', None);
-        self._client = client
-        self._name = config['name']
-        self._slave = config['slave']
-        self._address = config['address']
-        self._input_type = config['input_type']
-        self._data_type = config['data_type']
-        self._unit_of_measurement = config.get('unit_of_measurement', None)
-        self._scale = config.get('scale', None)
-        self._count = config['count']
-        self._state = None
-        self._value_map = config.get('value_map', {})  # Mapping of numeric values to states
+@dataclass(frozen=True)
+class SensorDescription:
+    """Description of a QR sensor."""
+
+    key: str
+    name: str
+    address: int
+    unit: str
+    device_class: SensorDeviceClass | None = None
+    scale: float = 1
+    state_class: SensorStateClass | None = SensorStateClass.MEASUREMENT
+
+
+SENSORS = (
+    SensorDescription(
+        "hours",
+        "Working hours",
+        REGISTER_HOURS,
+        "h",
+        SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+    ),
+    SensorDescription("fan_1", "Fan 1 speed", REGISTER_FAN_1, "rpm"),
+    SensorDescription("fan_2", "Fan 2 speed", REGISTER_FAN_2, "rpm"),
+    SensorDescription(
+        "t11",
+        "T11",
+        REGISTER_T11,
+        UnitOfTemperature.CELSIUS,
+        SensorDeviceClass.TEMPERATURE,
+        0.1,
+    ),
+    SensorDescription(
+        "t12",
+        "T12",
+        REGISTER_T12,
+        UnitOfTemperature.CELSIUS,
+        SensorDeviceClass.TEMPERATURE,
+        0.1,
+    ),
+    SensorDescription(
+        "t21",
+        "T21",
+        REGISTER_T21,
+        UnitOfTemperature.CELSIUS,
+        SensorDeviceClass.TEMPERATURE,
+        0.1,
+    ),
+    SensorDescription(
+        "t22",
+        "T22",
+        REGISTER_T22,
+        UnitOfTemperature.CELSIUS,
+        SensorDeviceClass.TEMPERATURE,
+        0.1,
+    ),
+    SensorDescription(
+        "sla",
+        "SLA analog input",
+        REGISTER_SLA,
+        "V",
+        SensorDeviceClass.VOLTAGE,
+        0.1,
+    ),
+    SensorDescription(
+        "s4", "S4 analog input", REGISTER_S4, "V", SensorDeviceClass.VOLTAGE, 0.1
+    ),
+    SensorDescription(
+        "modbus_fw_major",
+        "Modbus firmware major",
+        REGISTER_MODBUS_FW_MAJOR,
+        "",
+        state_class=None,
+    ),
+    SensorDescription(
+        "modbus_fw_minor",
+        "Modbus firmware minor",
+        REGISTER_MODBUS_FW_MINOR,
+        "",
+        state_class=None,
+    ),
+    SensorDescription(
+        "ctrl_dsp_fw_major",
+        "CTRL-DSP firmware major",
+        REGISTER_CTRL_DSP_FW_MAJOR,
+        "",
+        state_class=None,
+    ),
+    SensorDescription(
+        "ctrl_dsp_fw_minor",
+        "CTRL-DSP firmware minor",
+        REGISTER_CTRL_DSP_FW_MINOR,
+        "",
+        state_class=None,
+    ),
+    SensorDescription(
+        "filter_countdown",
+        "Filter countdown",
+        REGISTER_FILTER_COUNTDOWN,
+        "d",
+    ),
+    SensorDescription(
+        "humidity",
+        "Relative humidity",
+        REGISTER_HUMIDITY,
+        "%",
+        SensorDeviceClass.HUMIDITY,
+        scale=0.1,
+    ),
+    SensorDescription(
+        "fan_1_output", "Fan 1 output", REGISTER_FAN_1_OUTPUT, "%", scale=0.1
+    ),
+    SensorDescription(
+        "fan_2_output", "Fan 2 output", REGISTER_FAN_2_OUTPUT, "%", scale=0.1
+    ),
+)
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up sensors from a config entry."""
+    coordinator: AerauliqaQRCoordinator = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities(
+        AerauliqaQRSensor(coordinator, entry, description) for description in SENSORS
+    )
+
+
+class AerauliqaQRSensor(CoordinatorEntity, SensorEntity):
+    """Represent a QR measurement."""
+
+    entity_description: SensorDescription
+
+    def __init__(
+        self,
+        coordinator: AerauliqaQRCoordinator,
+        entry: ConfigEntry,
+        description: SensorDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+        self._attr_has_entity_name = True
+        self._attr_name = description.name
 
     @property
-    def name(self):
-        return self._name
+    def native_value(self) -> int | float:
+        """Return the latest sensor value."""
+        value = self.coordinator.data[self.entity_description.key]
+        return round(value * self.entity_description.scale, 1)
 
     @property
-    def unique_id(self):
-        return 'uq_' + self.entity_id
+    def native_unit_of_measurement(self) -> str | None:
+        """Return the measurement unit."""
+        return self.entity_description.unit or None
 
     @property
-    def supported_features(self):
-        """Flag supported features."""
-        if self._input_type == "input":
-            _LOGGER.debug("::Modbus register %s is input", self._name)
-            return 1
-        _LOGGER.debug("::Modbus register %s is read only", self._name)
-        return 0
-    
-    @property
-    def state(self):
-        if self._state is not None:
-            return self._state
-        return "Unknown"
+    def device_class(self) -> SensorDeviceClass | None:
+        """Return the measurement device class."""
+        return self.entity_description.device_class
 
     @property
-    def unit_of_measurement(self):
-        return self._unit_of_measurement
+    def state_class(self) -> SensorStateClass | None:
+        """Return the measurement state class."""
+        return self.entity_description.state_class
 
-    def update(self):
-        try:
-            _LOGGER.debug("::Modbus read holding reg, address: %s, slave: %s", self._address, self._slave)
-            response = self._client.read_holding_registers(
-                self._address,
-                count=self._count,
-                slave=self._slave
-            )
+    @property
+    def extra_state_attributes(self) -> dict[str, int]:
+        """Expose the corresponding Modbus register."""
+        return {"register": self.entity_description.address}
 
-            if response.isError():
-                _LOGGER.error("::Modbus error response: %s", str(response))
-                # self._state = None
-            else:
-                data = response.registers  # Read all registers
-                if self._count == 1:
-                    numeric_value = data[0]
-                else:
-                    # Combine the values from both registers
-                    numeric_value = (data[0] << 16) | data[1]
-                if numeric_value in self._value_map:
-                    self._state = self._value_map[numeric_value]
-                else:
-                    if self._scale != None:
-                        self._state = numeric_value * self._scale
-                    else:
-                        self._state = numeric_value
-        except ConnectionException as ex:
-            _LOGGER.error("::Modbus connection error: %s", str(ex))
-            # self._state = None
-    def write_register(self, value):
-        # Reverse the value_map to obtain numeric value from the selected state
-        numeric_value = next((k for k, v in self._value_map.items() if v == value), value)
-        _LOGGER.error("::Modbus write register of: %s to %s", self._name, numeric_value)
-
-        try:
-            response = self._client.write_register(
-                address=self._address,
-                value=numeric_value,
-                slave=self._slave
-            )
-
-            if response.isError():
-                _LOGGER.error("Modbus error response: %s", str(response))
-            else:
-                _LOGGER.debug("Successfully wrote register: %s", self._address)
-        except ConnectionException as ex:
-            _LOGGER.error("Modbus connection error: %s", str(ex))            
-
-    async def async_set_state(self, state):
-        _LOGGER.error("::Modbus set state of: %s to %s", self._name, state)
-        if self._input_type == "input":
-            # Call the write_register method to write the value
-            self.write_register(state)
-            # Update the internal state to reflect the change
-            self._state = state
-            # Notify Home Assistant that the state has changed
-            self.async_write_ha_state()
-        else:
-            _LOGGER.warning("This entity is read-only and cannot be modified.")
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Group all entities under the ventilator device."""
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)},
+            name=self._entry.title,
+            manufacturer="Aerauliqa",
+            model="QR heat-recovery ventilation unit",
+        )
