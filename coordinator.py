@@ -259,15 +259,12 @@ class AerauliqaQRCoordinator(DataUpdateCoordinator):
                     value=value,
                     slave=self.slave,
                 )
-                illegal_value = getattr(response, "exception_code", None) == 3
-                if isinstance(response, ModbusIOException) or illegal_value:
-                    failure_kind = "IllegalValue" if illegal_value else "no response"
+                if isinstance(response, ModbusIOException):
                     _LOGGER.warning(
-                        "Aerauliqa QR FC06 write at register=%s value=%s failed "
-                        "(%s); reconnecting and retrying once with FC16",
+                        "Aerauliqa QR did not respond to FC06 at register=%s "
+                        "value=%s; reconnecting and retrying once with FC16",
                         address,
                         value,
-                        failure_kind,
                     )
                     self.client.close()
                     if not self.client.connect():

@@ -70,11 +70,39 @@ temperatures:
   T12: sensor.aerauliqa_qr_t12
   T21: sensor.aerauliqa_qr_t21
   T22: sensor.aerauliqa_qr_t22
+fans:
+  fan_1:
+    output: sensor.aerauliqa_qr_fan_1_output
+    rpm: sensor.aerauliqa_qr_fan_1
+  fan_2:
+    output: sensor.aerauliqa_qr_fan_2_output
+    rpm: sensor.aerauliqa_qr_fan_2
 ```
 
 The power, fan-speed and working-mode entities are required; temperatures are
-optional. The card uses only Home Assistant's built-in frontend APIs and has
-no external JavaScript dependencies.
+optional. Fan output and RPM entities are optional; when configured, fan output
+drives the rotor animation and both measurements are shown on the card. The
+default diagram shows T11 → T12 as the supply-air path and T21 → T22 as the
+opposing extract-air path. If your installation uses a different sensor
+orientation, paths can be relabeled and reversed:
+
+```yaml
+air_paths:
+  - name: Supply air
+    from: T11
+    to: T12
+    direction: forward
+  - name: Extract air
+    from: T21
+    to: T22
+    direction: reverse
+```
+
+Each path's `from` and `to` values refer to keys under `temperatures`;
+`direction: reverse` draws its inlet on the right and its flow toward the left.
+The card uses only Home Assistant's built-in frontend APIs and has no external
+JavaScript dependencies. Fan and airflow animations respect the system's
+reduced-motion preference.
 
 ## Modbus register map
 
