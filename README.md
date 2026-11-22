@@ -100,9 +100,24 @@ air_paths:
 
 Each path's `from` and `to` values refer to keys under `temperatures`;
 `direction: reverse` draws its inlet on the right and its flow toward the left.
-The card uses only Home Assistant's built-in frontend APIs and has no external
-JavaScript dependencies. Fan and airflow animations respect the system's
-reduced-motion preference.
+The classic card remains available as `custom:aerauliqa-qr-card`. To use the
+perspective wireframe equipment view, switch to
+`custom:aerauliqa-qr-exploded-card` and add the filter entity:
+
+```yaml
+type: custom:aerauliqa-qr-exploded-card
+filter_entity: sensor.aerauliqa_qr_filter_countdown
+```
+
+`filter_entity` is required by the exploded card. The integration creates the
+`Filter countdown` sensor; use its entity ID from the device's entity list if
+Home Assistant assigned a different ID. The exploded view colors the filter
+red below 5 days, orange from 5 through 15 days, and green above 15 days. It
+colors fresh/supply air blue and extract/exhaust air red, and displays the four
+configured temperatures around the corresponding ports. The card uses only
+Home Assistant's built-in frontend APIs and has no external JavaScript
+dependencies. The exploded view has a neon-blue, matrix-inspired wireframe;
+fan and airflow animations respect the system's reduced-motion preference.
 
 ## Modbus register map
 
